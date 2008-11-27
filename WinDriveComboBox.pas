@@ -7,25 +7,39 @@ uses
   Generics.Collections;
 
 type
-  TTextCase = (tcLowerCase, tcUpperCase);
+  TTextCase = (tcLowerCase, tcUpperCase, tcNoneCase);
   TShowCase = (dvSimple, dvWin31, dvWin98);
 
-  TWinDrive = record
-    DriveLetter: Char;
-    DriveType: Integer;
-    Text: string;
+  TWinDrive = class(TObject)
+  private
+    FDriveNumber: Integer;
+    FID: string;
+    FDriveLetter: Char;
+    FDriveType: Integer;
+    FPathName: string;
+    function GetTextWithStyle(ShowCase: TShowCase = dvSimple;
+        TextCase: TTextCase = tcNoneCase): string;
+    function GetText: string;
+  public
+    constructor Create(DriveNumber: Integer);
+    property ID: string read FID;
+    property Text: string read GetText;
+    property PathName: string read FPathName;
+    property DriveLetter: Char read FDriveLetter;
+    property DriveType: Integer read FDriveType;
   end;
 
   TWinDriveComboBox = class(TCustomComboBox)
   private
     FIconHandles: TObjectDictionary<Integer, TIcon>;
-    FWinDrives: TList<TWinDrive>;
+    FWinDrives: TObjectList<TWinDrive>;
     FTextCase: TTextCase;
     FShowCase: TShowCase;
   protected
     function GetDrives(Index: Integer): TWinDrive;
     function GetSelected: TWinDrive;
     procedure Loaded; override;
+    procedure RefreshItems;
     procedure DrawItem(Index: Integer; Rect: TRect;
         State: TOwnerDrawState); override;
     procedure SetTextcase(Value: TTextCase);
@@ -36,25 +50,26 @@ type
     procedure DitectDrives;
     function GetCount: Integer; override;
     property Drives[Index: Integer]: TWinDrive read GetDrives;
+    property Selected: TWinDrive read GetSelected;
+    property Count: Integer read GetCount;
   published
     property TextCase: TTextCase read FTextCase write SetTextCase;
     property ShowCase: TShowCase read FShowCase write SetShowCase;
     property Align;
     property Color;
     property Constraints;
-    property Count: Integer read GetCount;
     property Ctl3D;
     property DragCursor;
     property DragKind;
     property DragMode;
     property Enabled;
     property Font;
+    property ItemIndex;
     property ParentColor;
     property ParentCtl3D;
     property ParentFont;
     property ParentShowHint;
     property PopupMenu;
-    property Selected: TWinDrive read GetSelected;
     property ShowHint;
     property TabOrder;
     property TabStop;
@@ -77,6 +92,86 @@ procedure Register;
 
 implementation
 
+constructor TWinDrive.Create(DriveNumber: Integer);
+
+  function GetVolumeName(PathName: string): string;
+  var
+    MaxComponentLength, VolumeFlags: Cardinal;
+    VolumeNameBuffer: array [0..255] of Char;
+  begin
+    if GetVolumeInformation(PWideChar(PathName), VolumeNameBuffer,
+        SizeOf(VolumeNameBuffer), nil, MaxComponentLength, VolumeFlags, nil, 0) then
+      Result := VolumeNameBuffer
+    else
+      Result := '';
+  end;
+
+begin
+  FDriveNumber := DriveNumber;
+
+  FDriveLetter := Chr(Ord('A') + FDriveNumber);
+  FPathName := Format('%s:\', [FDriveLetter]);
+
+  FDriveType := GetDriveType(PChar(FPathName));
+  if (FDriveType = DRIVE_REMOVABLE) and (FDriveNumber <= 1) then
+    FDriveType := 0; // floppy disk
+
+  case FDriveType of
+    0:
+      FID := '3.5 インチ FD';
+    DRIVE_REMOVABLE:
+      begin
+        FID := GetVolumeName(FPathName);
+        if FID = '' then
+          FID := 'リムーバブル ディスク';
+      end;
+    DRIVE_FIXED:
+      begin
+        FID := GetVolumeName(FPathName);
+        if FID = '' then
+          FID := 'ローカル ディスク';
+      end;
+    DRIVE_REMOTE:
+      begin
+        FID := '';
+      end;
+    DRIVE_CDROM:
+      begin
+        FID := GetVolumeName(FPathName);
+        if FID = '' then
+          FID := 'CD-ROM ドライブ';
+      end;
+    DRIVE_RAMDISK:
+      FID := 'RAM ディスク';
+    else
+      FID := ' ';
+  end;
+end;
+
+function TWinDrive.GetTextWithStyle(ShowCase: TShowCase = dvSimple;
+    TextCase: TTextCase = tcNoneCase): string;
+begin
+  case ShowCase of
+    dvSimple:
+      Result := Format('(%s:)', [FDriveLetter]);
+    dvWin31:
+      Result := Format('(%s:) [%s]', [FDriveLetter, FID]);
+    dvWin98:
+      Result := Format('%s (%s:)', [FID, FDriveLetter]);
+  end;
+  case TextCase of
+    tcLowerCase:
+      Result := LowerCase(Result);
+    tcUpperCase:
+      Result := UpperCase(Result);
+  end;
+end;
+
+function TWinDrive.GetText: string;
+begin
+  Result := GetTextWithStyle;
+end;
+
 constructor TWinDriveComboBox.Create(AOwner: TComponent);
 
   procedure LoadIconToDict(Key: Integer; IconIndex: Integer);
@@ -93,8 +188,10 @@ constructor TWinDriveComboBox.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
   Style := csOwnerDrawFixed;
+  FShowCase := dvWin98;
+  FTextCase := tcNoneCase;
 
-  // load icons
+  // load shell icons
   FIconHandles := TObjectDictionary<Integer, TIcon>.Create;
   LoadIconToDict(0, 6); // Floppy disk
   LoadIconToDict(DRIVE_REMOVABLE, 7);
@@ -103,8 +200,8 @@ begin
   LoadIconToDict(DRIVE_CDROM, 11);
   LoadIconToDict(DRIVE_RAMDISK, 7);
 
-  // create drive list
-  FWinDrives := TList<TWinDrive>.Create;
+  // create the drive list
+  FWinDrives := TObjectList<TWinDrive>.Create;
 end;
 
 destructor TWinDriveComboBox.Destroy;
@@ -121,6 +218,17 @@ begin
   ItemIndex := 0;
 end;
 
+procedure TWinDriveComboBox.RefreshItems;
+var
+  I, Index: Integer;
+begin
+  Index := ItemIndex;
+  Items.Clear;
+  for I := 0 to FWinDrives.Count - 1 do
+    Items.Add(FWinDrives[i].GetTextWithStyle(FShowCase, FTextCase));
+  ItemIndex := Index;
+end;
+
 procedure TWinDriveComboBox.DitectDrives;
 var
   I: Integer;
@@ -128,7 +236,6 @@ var
   DriveBits: set of 0..25;
   Drive: TWinDrive;
 begin
-  Items.Clear;
   FWinDrives.Clear;
 
   Drives := GetLogicalDrives;
@@ -138,15 +245,12 @@ begin
     for I := 0 to 25 do
       if I in DriveBits then
       begin
-        Drive.DriveLetter := Chr(Ord('A') + I);
-        Drive.Text := Drive.DriveLetter + ':\';
-        Drive.DriveType := GetDriveType(PChar(Drive.Text));
-        if (Drive.DriveType = DRIVE_REMOVABLE) and (I <= 1) then
-          Drive.DriveType := 0;
+        Drive := TWinDrive.Create(I);
         FWinDrives.Add(Drive);
-        Items.Add(Drive.Text);
       end;
   end;
+
+  RefreshItems;
 end;
 
 function TWinDriveComboBox.GetDrives(Index: Integer): TWinDrive;
@@ -170,6 +274,8 @@ const
   ICON_WIDTH = 16;
   ICON_HEIGHT = 16;
 begin
+  if Index > Items.Count - 1 then Exit;
+
   with Canvas do
   begin
     FillRect(Rect);
@@ -184,14 +290,16 @@ begin
   end;
 end;
 
-procedure TWinDriveComboBox.SetTextcase(Value: TTextCase);
+procedure TWinDriveComboBox.SetTextCase(Value: TTextCase);
 begin
-  //
+  FTextCase := Value;
+  RefreshItems;
 end;
 
-procedure TWinDriveComboBox.SetShowcase(Value: TShowCase);
+procedure TWinDriveComboBox.SetShowCase(Value: TShowCase);
 begin
-  //
+  FShowCase := Value;
+  RefreshItems;
 end;
 
 procedure Register;
