@@ -102,13 +102,25 @@ constructor TWinDrive.Create(DriveNumber: Integer);
     MaxComponentLength, VolumeFlags: Cardinal;
     VolumeNameBuffer: array [0..255] of Char;
   begin
-    if GetVolumeInformation(PWideChar(PathName), VolumeNameBuffer,
+    if GetVolumeInformation(PChar(PathName), VolumeNameBuffer,
         SizeOf(VolumeNameBuffer), nil, MaxComponentLength, VolumeFlags, nil, 0) then
       Result := VolumeNameBuffer
     else
       Result := '';
   end;
 
+  function GetRemoteVolumeName(DriveLetter: Char): string;
+  var
+    VolumeNameBuffer: array [0..255] of Char;
+    BufferSize: Cardinal;
+  begin
+    BufferSize := SizeOf(VolumeNameBuffer);
+    if WNetGetConnection(PChar(DriveLetter + ':'), VolumeNameBuffer,
+        BufferSize) = NO_ERROR then
+      Result := VolumeNameBuffer
+    else
+      Result := '';
+  end;
 begin
   FDriveNumber := DriveNumber;
 
@@ -136,7 +148,9 @@ begin
       end;
     DRIVE_REMOTE:
       begin
-        FID := '';
+        FID := GetRemoteVolumeName(FDriveLetter);
+        if FID = '' then
+          FID := 'ネットワーク ドライブ';
       end;
     DRIVE_CDROM:
       begin
@@ -176,13 +190,26 @@ begin
 end;
 
 constructor TWinDriveComboBox.Create(AOwner: TComponent);
+var
+  ResourceDLLName: string;
 
-  procedure LoadIconToDict(Key: Integer; IconIndex: Integer);
+  function IsVista: Boolean;
+  var
+    VersionInfo: TOSVersionInfo;
+  begin
+    VersionInfo.dwOSVersionInfoSize := SizeOf(TOSVersionInfo);
+    if GetVersionEx(VersionInfo) then
+      Result := (VersionInfo.dwMajorVersion = 6)
+    else
+      Result := False;
+  end;
+
+  procedure LoadIconToDict(DLLName: string; Key: Integer; IconIndex: Integer);
   var
     phIconLarge, phIconSmall: HICON;
   begin
     FIconHandles.Add(Key, TIcon.Create);
-    ExtractIconEx('shell32.dll', IconIndex, phIconLarge, phIconSmall, 1);
+    ExtractIconEx(PChar(DLLName), IconIndex, phIconLarge, phIconSmall, 1);
     FIconHandles[Key].Handle := phIconSmall;
     // destroy large icon
     DestroyIcon(phIconLarge);
@@ -196,12 +223,26 @@ begin
 
   // load shell icons
   FIconHandles := TObjectDictionary<Integer, TIcon>.Create;
-  LoadIconToDict(0, 6); // Floppy disk
-  LoadIconToDict(DRIVE_REMOVABLE, 7);
-  LoadIconToDict(DRIVE_FIXED, 8);
-  LoadIconToDict(DRIVE_REMOTE, 9);
-  LoadIconToDict(DRIVE_CDROM, 11);
-  LoadIconToDict(DRIVE_RAMDISK, 7);
+  if IsVista then
+  begin
+    ResourceDLLName := 'imageres.dll';
+    LoadIconToDict(ResourceDLLName, 0, 22); // Floppy disk
+    LoadIconToDict(ResourceDLLName, DRIVE_REMOVABLE, 29);
+    LoadIconToDict(ResourceDLLName, DRIVE_FIXED, 26);
+    LoadIconToDict(ResourceDLLName, DRIVE_REMOTE, 27);
+    LoadIconToDict(ResourceDLLName, DRIVE_CDROM, 24);
+    LoadIconToDict(ResourceDLLName, DRIVE_RAMDISK, 33);
+  end
+  else
+  begin
+    ResourceDLLName := 'shell32.dll';
+    LoadIconToDict(ResourceDLLName, 0, 6); // Floppy disk
+    LoadIconToDict(ResourceDLLName, DRIVE_REMOVABLE, 7);
+    LoadIconToDict(ResourceDLLName, DRIVE_FIXED, 8);
+    LoadIconToDict(ResourceDLLName, DRIVE_REMOTE, 9);
+    LoadIconToDict(ResourceDLLName, DRIVE_CDROM, 11);
+    LoadIconToDict(ResourceDLLName, DRIVE_RAMDISK, 7);
+  end;
 
   // create the drive list
   FWinDrives := TObjectList<TWinDrive>.Create;
