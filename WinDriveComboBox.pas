@@ -35,6 +35,7 @@ type
     FWinDrives: TObjectList<TWinDrive>;
     FTextCase: TTextCase;
     FShowCase: TShowCase;
+    FOnChange: TNotifyEvent;
   protected
     function GetDrives(Index: Integer): TWinDrive;
     function GetSelected: TWinDrive;
@@ -44,6 +45,7 @@ type
         State: TOwnerDrawState); override;
     procedure SetTextcase(Value: TTextCase);
     procedure SetShowcase(Value: TShowCase);
+    procedure Change; override;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -74,6 +76,7 @@ type
     property TabOrder;
     property TabStop;
     property Visible;
+    property OnChange: TNotifyEvent read FOnChange write FOnChange;
     property OnClick;
     property OnDblClick;
     property OnDragDrop;
@@ -300,6 +303,12 @@ procedure TWinDriveComboBox.SetShowCase(Value: TShowCase);
 begin
   FShowCase := Value;
   RefreshItems;
+end;
+
+procedure TWinDriveComboBox.Change;
+begin
+  if Assigned(FOnChange) then
+    FOnChange(Self);
 end;
 
 procedure Register;
